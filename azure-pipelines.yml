@@ -26,3 +26,18 @@ jobs:
           AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
           AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
         displayName: "Upload data to s3"
+      - script: |
+          RUST_LOG=build=debug cargo run --bin build-site ./rust ./cache ./html
+        displayName: "Build gh-pages"
+      - script: |
+          set -e
+          source ci/setup-git.sh
+          cd html
+          git init
+          git add .
+          git commit -m "Deploy $BUILD_SOURCEVERSION"
+          git push git@github.com:alexcrichton/rust-ci-timing-tracker master:gh-pages -f
+        displayName: "Push to gh-pages"
+        condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+        env:
+          GITHUB_DEPLOY_KEY: '$(GITHUB_DEPLOY_KEY)'
