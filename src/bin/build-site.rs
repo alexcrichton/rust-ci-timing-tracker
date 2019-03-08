@@ -135,7 +135,6 @@ fn get_commits(rust: &Path, cache: &Path) -> Result<Vec<(GitCommit, Commit)>, Er
         fs::create_dir_all(&commits_dir)?;
         let status = Command::new("curl")
             .arg("--remote-name-all")
-            .arg("--http2")
             .arg("-f")
             .args(&urls)
             .current_dir(commits_dir)
