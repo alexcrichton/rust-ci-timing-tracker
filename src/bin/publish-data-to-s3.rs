@@ -1,9 +1,12 @@
 use failure::{bail, format_err, Error, ResultExt};
-use std::collections::{HashMap, BTreeMap};
+use rayon::prelude::*;
+use std::collections::{BTreeMap, HashMap};
+use std::env;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{BufRead, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{self, Command, Stdio};
+use shared::*;
 
 struct Context {
     appveyor: HashMap<String, appveyor::Build>,
@@ -19,42 +22,72 @@ struct Log {
     path: String,
 }
 
-#[derive(serde::Serialize, Default)]
-struct Commit {
-    jobs: BTreeMap<String, Job>,
-}
+const USAGE: &'static str = "
+This is some usage
 
-#[derive(serde::Serialize)]
-struct Job {
-    url: String,
-    path: String,
-    timings: BTreeMap<String, Timing>,
-}
+Usage:
+    publish-data-to-s3 [options] <rust-repo> <cache-dir>
+    publish-data-to-s3 -h | --help
 
-#[derive(serde::Serialize, Default)]
-struct Timing {
-    dur: f64,
-    parts: BTreeMap<String, f64>,
+Options:
+    -h --help                    Show this screen.
+";
+
+#[derive(Debug, serde::Deserialize)]
+struct Args {
+    arg_rust_repo: PathBuf,
+    arg_cache_dir: PathBuf,
 }
 
 fn main() {
     env_logger::init();
-    let commit = std::env::args().nth(1).unwrap();
-    Context {
+
+    let args: Args = docopt::Docopt::new(USAGE)
+        .and_then(|d| d.deserialize())
+        .unwrap_or_else(|e| e.exit());
+
+    let result = Context {
         travis_offset: 0,
         appveyor_start_id: None,
         appveyor: HashMap::new(),
         travis: HashMap::new(),
-        cache: PathBuf::from("cache"),
+        cache: args.arg_cache_dir.clone(),
     }
-    .cache_commit(&commit)
-    .unwrap();
+    .run(&args);
+    let err = match result {
+        Ok(()) => return,
+        Err(e) => e,
+    };
+    eprintln!("error: {}", err);
+    for cause in err.iter_causes() {
+        eprintln!("\tcaused by: {}", cause);
+    }
+    process::exit(1);
 }
 
 impl Context {
+    fn run(&mut self, args: &Args) -> Result<(), Error> {
+        for commit in get_git_commits(&args.arg_rust_repo)? {
+            let commit = commit?;
+            if self.exists_on_s3(&commit) {
+                break;
+            }
+            self.cache_commit(&commit)?;
+        }
+        Ok(())
+    }
+
+    fn exists_on_s3(&self, commit: &str) -> bool {
+        self.curl_s3()
+            .head(true)
+            .get(&format!("/commits/{}.json.gz", commit))
+            .is_ok()
+    }
+
     fn cache_commit(&mut self, commit: &str) -> Result<(), Error> {
+        log::debug!("learning about {}", commit);
         let dir = self.cache.join("commits");
-        let dst = dir.join(commit).with_extension("json");
+        let dst = dir.join(commit).with_extension("json.gz");
         if dst.exists() {
             return Ok(());
         }
@@ -67,14 +100,21 @@ impl Context {
             let job = self
                 .identify_job(log)
                 .context(format!("failed to identify {}", log.job_url))?;
-            meta.jobs.insert(job, Job {
-                url: log.job_url.clone(),
-                path: log.path.clone(),
-                timings: self.extract_timings(&log.contents),
-            });
+            meta.jobs.insert(
+                job,
+                Job {
+                    url: log.job_url.clone(),
+                    path: log.path.clone(),
+                    timings: self.extract_timings(&log.contents),
+                },
+            );
         }
         let json = serde_json::to_string(&meta)?;
-        fs::write(&dst, json)?;
+        let mut raw = Vec::new();
+        let mut gz = flate2::write::GzEncoder::new(&mut raw, flate2::Compression::best());
+        gz.write_all(json.as_bytes())?;
+        gz.finish()?;
+        fs::write(&dst, raw)?;
         Ok(())
     }
 
@@ -106,7 +146,7 @@ impl Context {
                 }
             }
         }
-        return ret
+        return ret;
     }
 
     fn identify_job(&self, log: &Log) -> Result<String, Error> {
@@ -142,8 +182,13 @@ impl Context {
         let path = format!("/build/{}?include=build.jobs", build.id);
         let response = self.curl_travis().get_json::<travis::FullBuild>(&path)?;
 
-        for job in response.jobs.iter() {
-            logs.push(self.get_travis_log(&job.id.to_string())?);
+        let jobs = response
+            .jobs
+            .par_iter()
+            .map(|job| self.get_travis_log(&job.id.to_string()))
+            .collect::<Vec<_>>();
+        for job in jobs {
+            logs.push(job?);
         }
         Ok(())
     }
@@ -169,8 +214,14 @@ impl Context {
             .curl_appveyor()
             .get_json::<appveyor::GetFullBuild>(&path)?;
 
-        for job in response.build.jobs.iter() {
-            logs.push(self.get_appveyor_log(build.id, &job.id)?);
+        let jobs = response
+            .build
+            .jobs
+            .par_iter()
+            .map(|job| self.get_appveyor_log(build.id, &job.id))
+            .collect::<Vec<_>>();
+        for job in jobs {
+            logs.push(job?);
         }
         Ok(())
     }
@@ -268,6 +319,12 @@ impl Context {
     fn curl_appveyor(&self) -> Curl {
         self.curl("https://ci.appveyor.com")
     }
+
+    fn curl_s3(&self) -> Curl {
+        let region = env::var("S3_REGION").unwrap();
+        let bucket = env::var("S3_BUCKET").unwrap();
+        self.curl(&format!("https://s3-{}.amazonaws.com/{}", region, bucket))
+    }
 }
 
 struct Curl {
@@ -283,6 +340,13 @@ impl Curl {
             cmd,
             host: host.to_string(),
         }
+    }
+
+    fn head(&mut self, head: bool) -> &mut Curl {
+        if head {
+            self.cmd.arg("-I");
+        }
+        self
     }
 
     fn header(&mut self, name: &str, value: &str) -> &mut Curl {
@@ -382,4 +446,27 @@ mod appveyor {
         #[serde(rename = "jobId")]
         pub id: String,
     }
+}
+
+fn get_git_commits(repo: &Path) -> Result<impl Iterator<Item = Result<String, Error>>, Error> {
+    let mut child = Command::new("git")
+        .arg("log")
+        .arg("--author=bors")
+        .arg("--pretty=oneline")
+        .current_dir(repo)
+        .stdout(Stdio::piped())
+        .spawn()?;
+    let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+
+    Ok(std::iter::repeat(()).filter_map(move |()| {
+        let mut line = String::new();
+        match stdout.read_line(&mut line) {
+            Ok(0) => return None,
+            Ok(_) => {}
+            Err(e) => return Some(Err(e.into())),
+        }
+        let pos = line.find(' ').unwrap();
+        line.truncate(pos);
+        Some(Ok(line))
+    }))
 }
