@@ -22,13 +22,16 @@ pub struct Timing {
     pub parts: BTreeMap<String, f64>,
 }
 
+pub struct GitCommit {
+    pub sha: String,
+    pub date: String,
+}
 
-pub fn get_git_commits(repo: &Path) -> Result<impl Iterator<Item = Result<String, Error>>, Error> {
+pub fn get_git_commits(repo: &Path) -> Result<impl Iterator<Item = Result<GitCommit, Error>>, Error> {
     let mut child = Command::new("git")
         .arg("log")
-        .arg("master~72")
         .arg("--author=bors")
-        .arg("--pretty=oneline")
+        .arg("--pretty=%H %aI")
         .current_dir(repo)
         .stdout(Stdio::piped())
         .spawn()?;
@@ -41,8 +44,10 @@ pub fn get_git_commits(repo: &Path) -> Result<impl Iterator<Item = Result<String
             Ok(_) => {}
             Err(e) => return Some(Err(e.into())),
         }
-        let pos = line.find(' ').unwrap();
-        line.truncate(pos);
-        Some(Ok(line))
+        let mut parts = line.split_whitespace();
+        Some(Ok(GitCommit {
+            sha: parts.next().unwrap().to_string(),
+            date: parts.next().unwrap().to_string(),
+        }))
     }))
 }

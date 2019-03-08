@@ -69,10 +69,10 @@ impl Context {
     fn run(&mut self, args: &Args) -> Result<(), Error> {
         for commit in shared::get_git_commits(&args.arg_rust_repo)? {
             let commit = commit?;
-            if self.exists_on_s3(&commit) {
+            if self.exists_on_s3(&commit.sha) {
                 break;
             }
-            self.cache_commit(&commit)?;
+            self.cache_commit(&commit.sha)?;
         }
         Ok(())
     }
