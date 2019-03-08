@@ -7,19 +7,22 @@ jobs:
     pool:
       vmImage: 'Ubuntu-16.04'
     steps:
+      - script: |
+          set -e
+          pip install setuptools
+          pip install --user awscli
+          echo "##vso[task.prependpath]$HOME/.local/bin"
+        displayName: "Install awscli"
       - template: ci/azure-install-rust.yml
       - script: git clone https://github.com/rust-lang/rust --depth 200
         displayName: "Clone Rust"
       - script: |
-          set -e
-          pip install --user awscli
-          echo "##vso[task.prependpath]$HOME/.local/bin"
-        displayName: "Install awscli"
-      - script: |
           mkdir cache
           RUST_LOG=publish=debug cargo run --bin publish-data-to-s3 ./rust ./cache
+        displayName: "Collect data"
       - script: aws s3 sync ./cache s3://rust-ci-timing-tracker/
         condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
         env:
           AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
           AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        displayName: "Upload data to s3"
