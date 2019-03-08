@@ -1,19 +1,25 @@
-# Starter pipeline
-# Start with a minimal pipeline that you can customize to build and deploy your code.
-# Add steps that build, run tests, deploy, and more:
-# https://aka.ms/yaml
-
 trigger:
-- master
+  - master
 
-pool:
-  vmImage: 'Ubuntu-16.04'
-
-steps:
-- script: echo Hello, world!
-  displayName: 'Run a one-line script'
-
-- script: |
-    echo Add other tasks to build, test, and deploy your project.
-    echo See https://aka.ms/yaml
-  displayName: 'Run a multi-line script'
+jobs:
+  - job: publish_new_data
+    displayName: "Publish new timing data to S3"
+    pool:
+      vmImage: 'Ubuntu-16.04'
+    steps:
+      - template: ci/azure-install-rust.yml
+      - script: git clone https://github.com/rust-lang/rust --depth 200
+        displayName: "Clone Rust"
+      - script: |
+          set -e
+          pip install --user awscli
+          echo "##vso[task.prependpath]$HOME/.local/bin"
+        displayName: "Install awscli"
+      - script: |
+          mkdir cache
+          RUST_LOG=publish=debug cargo run --bin publish-data-to-s3 ./rust ./cache
+      - script: aws s3 sync ./cache s3://rust-ci-timing-tracker/
+        condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+        env:
+          AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+          AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)

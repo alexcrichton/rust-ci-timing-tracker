@@ -1,12 +1,12 @@
 use failure::{bail, format_err, Error, ResultExt};
 use rayon::prelude::*;
+use shared::*;
 use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::fs;
 use std::io::{BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{self, Command, Stdio};
-use shared::*;
 
 struct Context {
     appveyor: HashMap<String, appveyor::Build>,
@@ -277,10 +277,7 @@ impl Context {
 
         self.travis_offset += response.builds.len();
         for build in response.builds {
-            assert!(self
-                .travis
-                .insert(build.commit.sha.clone(), build)
-                .is_none());
+            self.travis.insert(build.commit.sha.clone(), build);
         }
         Ok(())
     }
@@ -296,10 +293,7 @@ impl Context {
 
         self.appveyor_start_id = Some(response.builds.last().unwrap().id);
         for build in response.builds {
-            assert!(self
-                .appveyor
-                .insert(build.commit_id.clone(), build)
-                .is_none());
+            self.appveyor.insert(build.commit_id.clone(), build);
         }
         Ok(())
     }
@@ -451,6 +445,7 @@ mod appveyor {
 fn get_git_commits(repo: &Path) -> Result<impl Iterator<Item = Result<String, Error>>, Error> {
     let mut child = Command::new("git")
         .arg("log")
+        .arg("master~72")
         .arg("--author=bors")
         .arg("--pretty=oneline")
         .current_dir(repo)
