@@ -1,12 +1,12 @@
 use failure::{bail, format_err, Error, ResultExt};
 use rayon::prelude::*;
-use shared::*;
 use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::fs;
-use std::io::{BufRead, Read, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{self, Command, Stdio};
+use shared::{Timing, Job, Commit};
 
 struct Context {
     appveyor: HashMap<String, appveyor::Build>,
@@ -67,7 +67,7 @@ fn main() {
 
 impl Context {
     fn run(&mut self, args: &Args) -> Result<(), Error> {
-        for commit in get_git_commits(&args.arg_rust_repo)? {
+        for commit in shared::get_git_commits(&args.arg_rust_repo)? {
             let commit = commit?;
             if self.exists_on_s3(&commit) {
                 break;
@@ -440,28 +440,4 @@ mod appveyor {
         #[serde(rename = "jobId")]
         pub id: String,
     }
-}
-
-fn get_git_commits(repo: &Path) -> Result<impl Iterator<Item = Result<String, Error>>, Error> {
-    let mut child = Command::new("git")
-        .arg("log")
-        .arg("master~72")
-        .arg("--author=bors")
-        .arg("--pretty=oneline")
-        .current_dir(repo)
-        .stdout(Stdio::piped())
-        .spawn()?;
-    let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
-
-    Ok(std::iter::repeat(()).filter_map(move |()| {
-        let mut line = String::new();
-        match stdout.read_line(&mut line) {
-            Ok(0) => return None,
-            Ok(_) => {}
-            Err(e) => return Some(Err(e.into())),
-        }
-        let pos = line.find(' ').unwrap();
-        line.truncate(pos);
-        Some(Ok(line))
-    }))
 }

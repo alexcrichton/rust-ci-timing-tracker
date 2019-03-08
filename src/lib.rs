@@ -1,4 +1,8 @@
+use failure::Error;
 use std::collections::BTreeMap;
+use std::io::BufRead;
+use std::path::Path;
+use std::process::{Command, Stdio};
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 pub struct Commit {
@@ -18,3 +22,27 @@ pub struct Timing {
     pub parts: BTreeMap<String, f64>,
 }
 
+
+pub fn get_git_commits(repo: &Path) -> Result<impl Iterator<Item = Result<String, Error>>, Error> {
+    let mut child = Command::new("git")
+        .arg("log")
+        .arg("master~72")
+        .arg("--author=bors")
+        .arg("--pretty=oneline")
+        .current_dir(repo)
+        .stdout(Stdio::piped())
+        .spawn()?;
+    let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+
+    Ok(std::iter::repeat(()).filter_map(move |()| {
+        let mut line = String::new();
+        match stdout.read_line(&mut line) {
+            Ok(0) => return None,
+            Ok(_) => {}
+            Err(e) => return Some(Err(e.into())),
+        }
+        let pos = line.find(' ').unwrap();
+        line.truncate(pos);
+        Some(Ok(line))
+    }))
+}
