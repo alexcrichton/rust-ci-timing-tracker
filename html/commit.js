@@ -122,14 +122,14 @@ async function renderTable() {
           const value = document.createElement('td');
 
           if ((step in first) && showRelative) {
-            const rel = dur - first[step];
-            value.dataset.value = rel;
-            const relText = Math.round(rel * 100) / 100;
+            value.dataset.value = dur - first[step];
+            const rel = (dur - first[step]) / first[step];
+            const relText = Math.round(rel * 10000) / 100;
             let html = '';
             if (rel > 0) {
-              html = `<span class='slower'>+${relText}s</span>`;
+              html = `<span class='slower'>+${relText}%</span>`;
             } else {
-              html = `<span class='faster'>${relText}s</span>`;
+              html = `<span class='faster'>${relText}%</span>`;
             }
             html += ` (${prettyDur(dur)})`;
             value.innerHTML = html;
