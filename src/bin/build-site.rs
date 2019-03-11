@@ -1,8 +1,8 @@
 use failure::Error;
 use shared::{Commit, GitCommit};
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
-use std::collections::{BTreeSet, BTreeMap};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
@@ -45,6 +45,13 @@ fn main() {
 
 fn run(args: &Args) -> Result<(), Error> {
     let commits = get_commits(&args.arg_rust_repo, &args.arg_cache_dir)?;
+
+    write_overall(&commits, &args.arg_out_dir)?;
+    write_each_commit(&commits, &args.arg_out_dir)?;
+    Ok(())
+}
+
+fn write_overall(commits: &[(GitCommit, Commit)], out_dir: &Path) -> Result<(), Error> {
     let mut jobs = BTreeMap::new();
     for (_sha, commit) in commits.iter() {
         for (name, data) in commit.jobs.iter() {
@@ -86,7 +93,13 @@ fn run(args: &Args) -> Result<(), Error> {
         for (_sha, commit) in commits.iter() {
             match commit.jobs.get(job) {
                 Some(data) => {
-                    series.data.push(data.timings.values().map(|t| t.dur).sum());
+                    series.data.push(
+                        data.timings
+                            .iter()
+                            .filter(|(k, _)| *k != "Distcheck")
+                            .map(|(_, v)| v.dur)
+                            .sum(),
+                    );
                 }
                 None => series.data.push(0.0),
             }
@@ -104,7 +117,16 @@ fn run(args: &Args) -> Result<(), Error> {
         data.data.reverse();
     }
     let json = serde_json::to_string(&data)?;
-    fs::write(args.arg_out_dir.join("overall.json"), json)?;
+    fs::write(out_dir.join("overall.json"), json)?;
+    Ok(())
+}
+
+fn write_each_commit(commits: &[(GitCommit, Commit)], out_dir: &Path) -> Result<(), Error> {
+    for (git, commit) in commits {
+        let dst = out_dir.join(&git.sha).with_extension("json");
+        let json = serde_json::to_string(&commit)?;
+        fs::write(&dst, json)?;
+    }
     Ok(())
 }
 
@@ -117,14 +139,14 @@ fn get_commits(rust: &Path, cache: &Path) -> Result<Vec<(GitCommit, Commit)>, Er
     let commits_dir = cache.join("commits");
     let mut paths = Vec::new();
     for commit in commits.iter() {
-        let path = commits_dir
-            .join(&commit.sha)
-            .with_extension("json.gz");
+        let path = commits_dir.join(&commit.sha).with_extension("json.gz");
         if !path.exists() {
-            let url = format!("https://s3-{}.amazonaws.com/{}/commits/{}.json.gz",
-                              env::var("S3_REGION").unwrap(),
-                              env::var("S3_BUCKET").unwrap(),
-                              commit.sha);
+            let url = format!(
+                "https://s3-{}.amazonaws.com/{}/commits/{}.json.gz",
+                env::var("S3_REGION").unwrap(),
+                env::var("S3_BUCKET").unwrap(),
+                commit.sha
+            );
             urls.push(url);
         }
         paths.push(path);

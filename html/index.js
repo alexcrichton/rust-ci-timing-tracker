@@ -19,6 +19,9 @@ async function run() {
   });
 
   var myChart = Highcharts.chart(element, {
+    chart: {
+      height: '100%',
+    },
     title: {
       text: 'TITLE',
     },
@@ -39,12 +42,8 @@ async function run() {
       title: {
         text: 'Commit index',
       },
-      // categories,
     },
     tooltip: {
-      // animation: false,
-      // hideDelay: 1000000000,
-      // outside: true,
       useHTML: true,
       style: {
         pointerEvents: 'auto',
@@ -53,20 +52,24 @@ async function run() {
       pointFormatter: function() {
         let text = '' + format(this.y);
         const commit = data.commits[this.index].sha;
-        const url = `https://github.com/rust-lang/rust/commit/${commit}`;
-        const link = `<a href="${url}">${commit.substring(0, 8)}</a>`;
-        text += '<br>' + link;
+        text += '<br>' + commit.substring(0, 8);
         return text;
       },
     },
     series,
-    // plotOptions: {
-    //   line: {
-    //     marker: {
-    //       enabled: true,
-    //     },
-    //   },
-    // },
+    plotOptions: {
+      series: {
+        point: {
+          events: {
+            click: event => {
+              const commit = data.commits[event.point.index].sha;
+              const name = event.point.series.name;
+              window.location = `commit.html?job=${name}&commit=${commit}`;
+            }
+          },
+        },
+      },
+    },
   });
 
   document.getElementById('loading').remove();
