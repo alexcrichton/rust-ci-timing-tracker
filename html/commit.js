@@ -89,15 +89,22 @@ async function renderTable() {
     for (let step in item.commit.jobs[job].timings) {
       if (step in stepSet)
         continue;
-      const row = document.createElement('tr');
-      table.appendChild(row);
-      const name = document.createElement('td');
-      name.textContent = prettyStep(step);
-      name.dataset.name = step;
-      name.classList.add('name');
-      row.appendChild(name);
-      stepSet[step] = row;
-      steps.push(step);
+
+      const add = step => {
+        const row = document.createElement('tr');
+        table.appendChild(row);
+        const name = document.createElement('td');
+        name.textContent = prettyStep(step);
+        name.dataset.name = step;
+        name.classList.add('name');
+        row.appendChild(name);
+        stepSet[step] = row;
+        steps.push(step);
+      };
+      add(step);
+      for (let part in item.commit.jobs[job].timings[step].parts) {
+        add(`${part} - ${step}`);
+      }
     }
   }
 
@@ -110,28 +117,42 @@ async function renderTable() {
       const timings = item.commit.jobs[job].timings;
 
       for (let step of steps) {
-        const row = stepSet[step];
-        const value = document.createElement('td');
-        const dur = step in timings ? timings[step].dur : 0;
+        const add = (step, dur) => {
+          const row = stepSet[step];
+          const value = document.createElement('td');
 
-        if ((step in first) && showRelative) {
-          const rel = dur - first[step];
-          value.dataset.value = rel;
-          const relText = Math.round(rel * 100) / 100;
-          let html = '';
-          if (rel > 0) {
-            html = `<span class='slower'>+${relText}s</span>`;
+          if ((step in first) && showRelative) {
+            const rel = dur - first[step];
+            value.dataset.value = rel;
+            const relText = Math.round(rel * 100) / 100;
+            let html = '';
+            if (rel > 0) {
+              html = `<span class='slower'>+${relText}s</span>`;
+            } else {
+              html = `<span class='faster'>${relText}s</span>`;
+            }
+            html += ` (${prettyDur(dur)})`;
+            value.innerHTML = html;
           } else {
-            html = `<span class='faster'>${relText}s</span>`;
+            first[step] = dur;
+            value.dataset.value = dur;
+            value.textContent = prettyDur(dur);
           }
-          html += ` (${prettyDur(dur)})`;
-          value.innerHTML = html;
+          row.appendChild(value);
+        };
+        const s = step.split(' - ');
+        if (s.length == 1) {
+          const dur = step in timings ? timings[step].dur : 0;
+          add(step, dur);
         } else {
-          first[step] = dur;
-          value.dataset.value = dur;
-          value.textContent = prettyDur(dur);
+          let dur = 0;
+          if (s[1] in timings) {
+            if (s[0] in timings[s[1]].parts) {
+              dur = timings[s[1]].parts[s[0]];
+            }
+          }
+          add(step, dur);
         }
-        row.appendChild(value);
       }
 
       const title = document.createElement('td');
