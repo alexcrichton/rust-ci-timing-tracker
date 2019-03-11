@@ -1,5 +1,5 @@
 const table = document.createElement('table');
-const urlParams = new URLSearchParams(window.location.search);
+const urlParams = new URLSearchParams(window.location.hash.substring(1));
 const job = urlParams.get('job');
 let sortCol = 0;
 let sortDesc = true;
@@ -181,16 +181,12 @@ function updateUrl() {
       shas.push(td.dataset.commit);
   }
 
-  let query = `?job=${job}`;
-  query += `&commit=${shas.join(',')}`;
-  query += `&relative=${showRelative}`;
-  query += `&col=${sortCol}`;
-  query += `&desc=${sortDesc}`;
-
-  if (window.location.search != query) {
-    window.history.pushState({}, "Title", "commit.html" + query);
-  }
-
+  let hash = `#job=${job}`;
+  hash += `&commit=${shas.join(',')}`;
+  hash += `&relative=${showRelative}`;
+  hash += `&col=${sortCol}`;
+  hash += `&desc=${sortDesc}`;
+  window.location.hash = hash;
 }
 
 async function commitOrder() {
