@@ -83,15 +83,28 @@ async function renderTable() {
   stepTitle.textContent = `${job} steps`;
   titles.appendChild(stepTitle);
 
+  const cpuMicroarchs = document.createElement('tr');
+  table.appendChild(cpuMicroarchs);
+  const cpuMicroarchsTitle = document.createElement('td');
+  cpuMicroarchsTitle.textContent = 'CPU microarchitecture';
+  cpuMicroarchs.appendChild(cpuMicroarchsTitle);
+
   for (let item of order) {
     if (item.commit === undefined)
       continue;
+    let microarch = item.commit.jobs[job].cpu_microarch;
+    if (microarch === null)
+      microarch = 'unknown';
+    const microarchCell = document.createElement('td');
+    microarchCell.textContent = microarch;
+    cpuMicroarchs.appendChild(microarchCell);
     for (let step in item.commit.jobs[job].timings) {
       if (step in stepSet)
         continue;
 
       const add = step => {
         const row = document.createElement('tr');
+        row.classList.add('sortable');
         table.appendChild(row);
         const name = document.createElement('td');
         name.textContent = prettyStep(step);
@@ -271,7 +284,7 @@ function sortTable() {
     sorts[sortCol].textContent = "⬆";
 
   const rows = [];
-  for (let row of table.querySelectorAll('tr:not(:first-child)')) {
+  for (let row of table.querySelectorAll('tr.sortable')) {
     row.remove();
     rows.push(row);
   }

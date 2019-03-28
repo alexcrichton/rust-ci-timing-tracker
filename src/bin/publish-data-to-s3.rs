@@ -1,12 +1,12 @@
 use failure::{bail, format_err, Error, ResultExt};
 use rayon::prelude::*;
+use shared::{Commit, Job, Timing};
 use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{self, Command, Stdio};
-use shared::{Timing, Job, Commit};
 
 struct Context {
     appveyor: HashMap<String, appveyor::Build>,
@@ -105,6 +105,7 @@ impl Context {
                 Job {
                     url: log.job_url.clone(),
                     path: log.path.clone(),
+                    cpu_microarch: self.extract_cpu_microarch(&log.contents),
                     timings: self.extract_timings(&log.contents),
                 },
             );
@@ -123,19 +124,14 @@ impl Context {
         let mut parts = HashMap::new();
         for line in contents.lines() {
             let line = line.trim();
-            let needle1 = "[TIMING] ";
-            let needle2 = "[RUSTC-TIMING] ";
-
-            if let Some(pos) = line.find(needle2) {
-                let rest = &line[pos + needle2.len()..];
+            if let Some(rest) = find_get_after(line, "[RUSTC-TIMING] ") {
                 let mut iter = rest.rsplitn(2, ' ');
                 let time = iter.next().unwrap().parse::<f64>().unwrap();
                 let name = iter.next().unwrap();
                 *parts.entry(name.to_string()).or_insert(0.0) += time;
             }
 
-            if let Some(pos) = line.find(needle1) {
-                let rest = &line[pos + needle1.len()..];
+            if let Some(rest) = find_get_after(line, "[TIMING] ") {
                 let pos = rest.find(" -- ").unwrap();
                 let step = &rest[..pos];
                 let dur = rest[pos + 4..].parse::<f64>().unwrap();
@@ -147,6 +143,29 @@ impl Context {
             }
         }
         return ret;
+    }
+
+    fn extract_cpu_microarch(&self, contents: &str) -> Option<String> {
+        let mut family = None;
+        for line in contents.lines() {
+            let line = line.trim();
+            match family {
+                None => {
+                    if let Some(family_content) = find_get_after(line, "cpu family\t: ") {
+                        family = Some(family_content);
+                    }
+                }
+                Some(family) => {
+                    if let Some(model) = find_get_after(line, "model\t\t: ") {
+                        return INTEL_CPU_MODEL_TO_MICROARCH
+                            .iter()
+                            .find(|(f, m, _)| *f == family && *m == model)
+                            .map(|(_, _, arch)| arch.to_string());
+                    }
+                }
+            }
+        }
+        None
     }
 
     fn identify_job(&self, log: &Log) -> Result<String, Error> {
@@ -315,8 +334,8 @@ impl Context {
     }
 
     fn curl_s3(&self) -> Curl {
-        let region = env::var("S3_REGION").unwrap();
-        let bucket = env::var("S3_BUCKET").unwrap();
+        let region = env::var("S3_REGION").expect("missing environment variable S3_REGION");
+        let bucket = env::var("S3_BUCKET").expect("missing environment variable S3_BUCKET");
         self.curl(&format!("https://s3-{}.amazonaws.com/{}", region, bucket))
     }
 }
@@ -372,6 +391,23 @@ impl Curl {
         }
     }
 }
+
+fn find_get_after<'a>(content: &'a str, needle: &str) -> Option<&'a str> {
+    content
+        .find(needle)
+        .map(|pos| &content[pos + needle.len()..])
+}
+
+/// Map the CPU family and model to the microarchitecture name
+/// Source for the data: https://en.wikichip.org/wiki/intel/cpuid
+static INTEL_CPU_MODEL_TO_MICROARCH: &[(&str, &str, &str)] = &[
+    ("6", "45", "sandybridge"),
+    ("6", "62", "ivybridge"),
+    ("6", "63", "haswell"),
+    ("6", "79", "broadwell"),
+    ("6", "85", "skylake"),
+    ("6", "86", "broadwell"),
+];
 
 #[allow(dead_code)]
 mod travis {

@@ -13,6 +13,7 @@ pub struct Commit {
 pub struct Job {
     pub url: String,
     pub path: String,
+    pub cpu_microarch: Option<String>,
     pub timings: BTreeMap<String, Timing>,
 }
 
@@ -27,7 +28,9 @@ pub struct GitCommit {
     pub date: String,
 }
 
-pub fn get_git_commits(repo: &Path) -> Result<impl Iterator<Item = Result<GitCommit, Error>>, Error> {
+pub fn get_git_commits(
+    repo: &Path,
+) -> Result<impl Iterator<Item = Result<GitCommit, Error>>, Error> {
     let mut child = Command::new("git")
         .arg("log")
         .arg("--author=bors")

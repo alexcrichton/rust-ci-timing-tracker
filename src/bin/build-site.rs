@@ -1,6 +1,6 @@
 use failure::Error;
 use shared::{Commit, GitCommit};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::io::Read;
@@ -46,6 +46,9 @@ fn main() {
 fn run(args: &Args) -> Result<(), Error> {
     let commits = get_commits(&args.arg_rust_repo, &args.arg_cache_dir)?;
 
+    if !args.arg_out_dir.exists() {
+        std::fs::create_dir_all(&args.arg_out_dir)?;
+    }
     write_overall(&commits, &args.arg_out_dir)?;
     write_each_commit(&commits, &args.arg_out_dir)?;
     Ok(())
@@ -83,6 +86,11 @@ fn write_overall(commits: &[(GitCommit, Commit)], out_dir: &Path) -> Result<(), 
     struct Commit<'a> {
         sha: &'a str,
         date: &'a str,
+        jobs: BTreeMap<&'a str, Job<'a>>,
+    }
+    #[derive(serde::Serialize)]
+    struct Job<'a> {
+        cpu_microarch: Option<&'a str>,
     }
     let mut data = Data::default();
     for job in slowest_jobs {
@@ -106,10 +114,22 @@ fn write_overall(commits: &[(GitCommit, Commit)], out_dir: &Path) -> Result<(), 
         }
         data.series.push(series);
     }
-    for (git, _commit) in commits.iter() {
+    for (git, commit) in commits.iter() {
         data.commits.push(Commit {
             sha: &git.sha,
             date: &git.date,
+            jobs: commit
+                .jobs
+                .iter()
+                .map(|(name, job)| {
+                    (
+                        name.as_str(),
+                        Job {
+                            cpu_microarch: job.cpu_microarch.as_ref().map(|cpu| cpu.as_str()),
+                        },
+                    )
+                })
+                .collect(),
         });
     }
     data.commits.reverse();
@@ -143,8 +163,8 @@ fn get_commits(rust: &Path, cache: &Path) -> Result<Vec<(GitCommit, Commit)>, Er
         if !path.exists() {
             let url = format!(
                 "https://s3-{}.amazonaws.com/{}/commits/{}.json.gz",
-                env::var("S3_REGION").unwrap(),
-                env::var("S3_BUCKET").unwrap(),
+                env::var("S3_REGION").expect("missing environment variable S3_REGION"),
+                env::var("S3_BUCKET").expect("missing environment variable S3_BUCKET"),
                 commit.sha
             );
             urls.push(url);
