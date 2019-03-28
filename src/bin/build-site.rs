@@ -46,6 +46,9 @@ fn main() {
 fn run(args: &Args) -> Result<(), Error> {
     let commits = get_commits(&args.arg_rust_repo, &args.arg_cache_dir)?;
 
+    if !args.arg_out_dir.exists() {
+        std::fs::create_dir_all(&args.arg_out_dir)?;
+    }
     write_overall(&commits, &args.arg_out_dir)?;
     write_each_commit(&commits, &args.arg_out_dir)?;
     Ok(())
