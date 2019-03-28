@@ -1,6 +1,6 @@
 use failure::Error;
 use shared::{Commit, GitCommit};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::io::Read;
@@ -86,6 +86,11 @@ fn write_overall(commits: &[(GitCommit, Commit)], out_dir: &Path) -> Result<(), 
     struct Commit<'a> {
         sha: &'a str,
         date: &'a str,
+        jobs: BTreeMap<&'a str, Job<'a>>,
+    }
+    #[derive(serde::Serialize)]
+    struct Job<'a> {
+        cpu_microarch: Option<&'a str>,
     }
     let mut data = Data::default();
     for job in slowest_jobs {
@@ -109,10 +114,22 @@ fn write_overall(commits: &[(GitCommit, Commit)], out_dir: &Path) -> Result<(), 
         }
         data.series.push(series);
     }
-    for (git, _commit) in commits.iter() {
+    for (git, commit) in commits.iter() {
         data.commits.push(Commit {
             sha: &git.sha,
             date: &git.date,
+            jobs: commit
+                .jobs
+                .iter()
+                .map(|(name, job)| {
+                    (
+                        name.as_str(),
+                        Job {
+                            cpu_microarch: job.cpu_microarch.as_ref().map(|cpu| cpu.as_str()),
+                        },
+                    )
+                })
+                .collect(),
         });
     }
     data.commits.reverse();

@@ -65,9 +65,12 @@ async function run() {
       },
       headerFormat: '<b>{series.name}</b><br>',
       pointFormatter: function() {
-        let text = '' + format(this.y);
+        let text = '<small>length:</small> ' + format(this.y);
         const commit = data.commits[this.index].sha;
-        text += '<br>' + commit.substring(0, 8);
+        text += '<br><small>sha:</small> ' + commit.substring(0, 8);
+        const microarch = data.commits[this.index].jobs[this.series.name].cpu_microarch;
+        if (microarch !== null)
+          text += '<br><small>cpu:</small> ' + microarch;
         return text;
       },
     },
