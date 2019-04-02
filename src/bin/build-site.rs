@@ -61,7 +61,11 @@ fn write_overall(commits: &[(GitCommit, Commit)], out_dir: &Path) -> Result<(), 
             let (count, total) = jobs.entry(name).or_insert((0, 0.0));
             *count += 1;
             for (_name, timing) in data.timings.iter() {
-                *total += timing.dur;
+                // Similar to below, ignore "Distcheck" for total time because
+                // it double-counts a bunch of the smaller steps
+                if name != "Distcheck" {
+                    *total += timing.dur;
+                }
             }
         }
     }
@@ -104,6 +108,7 @@ fn write_overall(commits: &[(GitCommit, Commit)], out_dir: &Path) -> Result<(), 
                     series.data.push(
                         data.timings
                             .iter()
+                            // Distcheck double-counts steps, so ignore it
                             .filter(|(k, _)| *k != "Distcheck")
                             .map(|(_, v)| v.dur)
                             .sum(),
