@@ -1,4 +1,4 @@
-use failure::{bail, format_err, Error, ResultExt};
+use failure::{bail, format_err, Error};
 use rayon::prelude::*;
 use shared::{Commit, Job, Timing};
 use std::collections::{BTreeMap, HashMap};
@@ -97,9 +97,10 @@ impl Context {
         let mut meta = Commit::default();
 
         for log in logs.iter() {
-            let job = self
-                .identify_job(log)
-                .context(format!("failed to identify {}", log.job_url))?;
+            let job = match self.identify_job(log) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
             meta.jobs.insert(
                 job,
                 Job {
