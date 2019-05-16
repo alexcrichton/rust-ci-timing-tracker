@@ -334,9 +334,8 @@ impl Context {
     }
 
     fn curl_s3(&self) -> Curl {
-        let region = env::var("S3_REGION").expect("missing environment variable S3_REGION");
         let bucket = env::var("S3_BUCKET").expect("missing environment variable S3_BUCKET");
-        self.curl(&format!("https://s3-{}.amazonaws.com/{}", region, bucket))
+        self.curl(&format!("https://{}.s3.amazonaws.com", bucket))
     }
 }
 

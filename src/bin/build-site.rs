@@ -167,8 +167,7 @@ fn get_commits(rust: &Path, cache: &Path) -> Result<Vec<(GitCommit, Commit)>, Er
         let path = commits_dir.join(&commit.sha).with_extension("json.gz");
         if !path.exists() {
             let url = format!(
-                "https://s3-{}.amazonaws.com/{}/commits/{}.json.gz",
-                env::var("S3_REGION").expect("missing environment variable S3_REGION"),
+                "https://{}.s3.amazonaws.com/commits/{}.json.gz",
                 env::var("S3_BUCKET").expect("missing environment variable S3_BUCKET"),
                 commit.sha
             );
