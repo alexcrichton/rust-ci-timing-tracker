@@ -132,7 +132,10 @@ impl Context {
             }
 
             if let Some(rest) = find_get_after(line, "[TIMING] ") {
-                let pos = rest.find(" -- ").unwrap();
+                let pos = match rest.find(" -- ") {
+                    Some(i) => i,
+                    None => continue,
+                };
                 let step = &rest[..pos];
                 let dur = rest[pos + 4..].parse::<f64>().unwrap();
                 let timing = ret.entry(step.to_string()).or_insert_with(Timing::default);
