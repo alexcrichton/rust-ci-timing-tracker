@@ -20,7 +20,7 @@ jobs:
           mkdir cache
           RUST_LOG=publish=debug cargo run --bin publish-data-to-s3 ./rust ./cache
         displayName: "Collect data"
-      - script: aws s3 sync ./cache s3://rust-ci-timing-tracker/
+      - script: aws s3 cp --recursive ./cache s3://rust-ci-timing-tracker/
         condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
         env:
           AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
