@@ -9,10 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{self, Command, Stdio};
 
 struct Context {
-    appveyor: HashMap<String, appveyor::Build>,
-    travis: HashMap<String, travis::Build>,
-    appveyor_start_id: Option<u64>,
-    travis_offset: usize,
+    azure: HashMap<String, azure::Build>,
     cache: PathBuf,
 }
 
@@ -47,10 +44,7 @@ fn main() {
         .unwrap_or_else(|e| e.exit());
 
     let result = Context {
-        travis_offset: 0,
-        appveyor_start_id: None,
-        appveyor: HashMap::new(),
-        travis: HashMap::new(),
+        azure: HashMap::new(),
         cache: args.arg_cache_dir.clone(),
     }
     .run(&args);
@@ -73,6 +67,9 @@ impl Context {
                 break;
             }
             self.cache_commit(&commit.sha)?;
+            if commit.sha == "3849a5f83b82258fd76a3ff64933b81d7efeffa1" {
+                break;
+            }
         }
         Ok(())
     }
@@ -182,86 +179,82 @@ impl Context {
         let pos = line.find(needle).unwrap();
         let contents = &line[pos + needle.len()..];
         let contents = contents.split(']').next().unwrap();
-        Ok(contents.to_string())
+
+        // azure at one point buggily named everything `JobXX`
+        if !contents.starts_with("Job") {
+            return Ok(contents.to_string())
+        }
+
+        let needle = "AGENT_JOBNAME=";
+        let line = log
+            .contents
+            .lines()
+            .find(|l| l.contains(needle))
+            .ok_or(format_err!("failed to find `{}`", needle))?;
+        let pos = line.find(needle).unwrap();
+        let contents = &line[pos + needle.len()..];
+        Ok(contents.split_whitespace().skip(1).next().unwrap().to_string())
     }
 
     fn logs(&mut self, commit: &str) -> Result<Vec<Log>, Error> {
-        while self.travis.get(commit).is_none() {
-            self.load_more_travis()?;
-        }
-        while self.appveyor.get(commit).is_none() {
-            self.load_more_appveyor()?;
+        while self.azure.get(commit).is_none() {
+            self.load_more_azure()?;
         }
 
         let mut logs = Vec::new();
-        self.appveyor_logs(commit, &mut logs)?;
-        self.travis_logs(commit, &mut logs)?;
+        self.azure_logs(commit, &mut logs)?;
 
         Ok(logs)
     }
 
-    fn travis_logs(&mut self, commit: &str, logs: &mut Vec<Log>) -> Result<(), Error> {
-        let build = &self.travis[commit];
-        let path = format!("/build/{}?include=build.jobs", build.id);
-        let response = self.curl_travis().get_json::<travis::FullBuild>(&path)?;
+    fn azure_logs(&mut self, commit: &str, logs: &mut Vec<Log>) -> Result<(), Error> {
+        let build = &self.azure[commit];
+        let response = self.curl_azure().get_json::<azure::Timeline>(&build._links.timeline.href)?;
 
         let jobs = response
-            .jobs
+            .records
             .par_iter()
-            .map(|job| self.get_travis_log(&job.id.to_string()))
+            .filter(|record| {
+                if record.r#type != "Job" {
+                    return false;
+                }
+
+                // TODO: it looks like some logs are just missing from azure? See
+                // https://dev.azure.com/rust-lang/rust/_build/results?buildId=3198
+                // and dist-i686-apple for example...
+                if record.log.is_none() {
+                    return false;
+                }
+
+                true
+            })
+            .map(|record| self.get_azure_log(commit, record).map_err(|e| (e, record)))
             .collect::<Vec<_>>();
         for job in jobs {
-            logs.push(job?);
+            match job {
+                Ok(s) => logs.push(s),
+                // TODO: ignore errors when fetching logs. Apparently some logs
+                // seem corrupted and/or azure just 500's whenever we try to
+                // fetch them. We're somewhat opportunistic anyway so just
+                // ignore it for now I guess?
+                Err((e, record)) => {
+                    println!("failed to fetch {}/{}", commit, record.id);
+                    println!("error: {}", e);
+                }
+            }
         }
         Ok(())
     }
 
-    fn get_travis_log(&self, job: &str) -> Result<Log, Error> {
-        let path = format!("logs/travis/{}.gz", job);
+    fn get_azure_log(&self, commit: &str, record: &azure::TimelineRecord) -> Result<Log, Error> {
+        let log = record.log.as_ref().unwrap();
+        let path = format!("logs/azure/{}-{}.gz", commit, record.id);
         let dst = self.cache.join(&path);
         let contents = self.get_log(&dst, || {
-            self.curl_travis().get(&format!("/v3/job/{}/log.txt", job))
+            self.curl_azure().get(&log.url)
         })?;
-        let job_url = format!("https://travis-ci.com/rust-lang/rust/jobs/{}", job);
         Ok(Log {
-            job_url,
-            contents,
-            path,
-        })
-    }
-
-    fn appveyor_logs(&mut self, commit: &str, logs: &mut Vec<Log>) -> Result<(), Error> {
-        let build = &self.appveyor[commit];
-        let path = format!("/api/projects/rust-lang/rust/build/{}", build.version);
-        let response = self
-            .curl_appveyor()
-            .get_json::<appveyor::GetFullBuild>(&path)?;
-
-        let jobs = response
-            .build
-            .jobs
-            .par_iter()
-            .map(|job| self.get_appveyor_log(build.id, &job.id))
-            .collect::<Vec<_>>();
-        for job in jobs {
-            logs.push(job?);
-        }
-        Ok(())
-    }
-
-    fn get_appveyor_log(&self, build_id: u64, job: &str) -> Result<Log, Error> {
-        let path = format!("logs/appveyor/{}-{}.gz", build_id, job);
-        let dst = self.cache.join(&path);
-        let contents = self.get_log(&dst, || {
-            self.curl_appveyor()
-                .get(&format!("/api/buildjobs/{}/log", job))
-        })?;
-        let job_url = format!(
-            "https://ci.appveyor.com/project/rust-lang/rust/builds/{}/job/{}",
-            build_id, job
-        );
-        Ok(Log {
-            job_url,
+            job_url: log.url.clone(),
             contents,
             path,
         })
@@ -290,33 +283,18 @@ impl Context {
         }
     }
 
-    fn load_more_travis(&mut self) -> Result<(), Error> {
-        let mut path = format!("/repo/rust-lang%2Frust/builds");
-        path.push_str("?branch.name=auto");
-        path.push_str("&sort_by=started_at:desc");
-        path.push_str("&limit=25");
-        path.push_str(&format!("&offset={}", self.travis_offset));
-        let response = self.curl_travis().get_json::<travis::Builds>(&path)?;
-
-        self.travis_offset += response.builds.len();
-        for build in response.builds {
-            self.travis.insert(build.commit.sha.clone(), build);
+    fn load_more_azure(&mut self) -> Result<(), Error> {
+        if self.azure.len() > 0 {
+            bail!("never did figure out the continuationToken thing");
         }
-        Ok(())
-    }
+        let mut path = format!("/rust-lang/rust/_apis/build/builds");
+        path.push_str("?api-version=5.0");
+        path.push_str("&branchName=refs/heads/auto");
+        path.push_str("&queryOrder=finishTimeDescending");
+        let response = self.curl_azure().get_json::<azure::List>(&path)?;
 
-    fn load_more_appveyor(&mut self) -> Result<(), Error> {
-        let mut path = format!("/api/projects/rust-lang/rust/history");
-        path.push_str("?branch=auto");
-        path.push_str("&recordsNumber=100");
-        if let Some(id) = self.appveyor_start_id.take() {
-            path.push_str(&format!("&startBuildId={}", id));
-        }
-        let response = self.curl_appveyor().get_json::<appveyor::Builds>(&path)?;
-
-        self.appveyor_start_id = Some(response.builds.last().unwrap().id);
-        for build in response.builds {
-            self.appveyor.insert(build.commit_id.clone(), build);
+        for build in response.value {
+            self.azure.insert(build.source_version.clone(), build);
         }
         Ok(())
     }
@@ -327,14 +305,8 @@ impl Context {
         return ret;
     }
 
-    fn curl_travis(&self) -> Curl {
-        let mut ret = self.curl("https://api.travis-ci.com");
-        ret.header("Travis-API-Version", "3");
-        return ret;
-    }
-
-    fn curl_appveyor(&self) -> Curl {
-        self.curl("https://ci.appveyor.com")
+    fn curl_azure(&self) -> Curl {
+        self.curl("https://dev.azure.com")
     }
 
     fn curl_s3(&self) -> Curl {
@@ -384,7 +356,11 @@ impl Curl {
     }
 
     fn get(&mut self, path: &str) -> Result<String, Error> {
-        let url = format!("{}{}", self.host, path);
+        let url = if path.starts_with("https://") {
+            path.to_string()
+        } else {
+            format!("{}{}", self.host, path)
+        };
         log::debug!("GET: {}", url);
         let output = self.cmd.arg(&url).stderr(Stdio::inherit()).output()?;
         if output.status.success() {
@@ -413,70 +389,43 @@ static INTEL_CPU_MODEL_TO_MICROARCH: &[(&str, &str, &str)] = &[
 ];
 
 #[allow(dead_code)]
-mod travis {
+mod azure {
     #[derive(serde::Deserialize)]
-    pub struct Builds {
-        pub builds: Vec<Build>,
+    pub struct List {
+        pub value: Vec<Build>,
     }
 
     #[derive(serde::Deserialize)]
     pub struct Build {
-        pub id: u64,
-        pub number: String,
-        pub started_at: Option<String>,
-        pub finished_at: Option<String>,
-        pub commit: Commit,
+        #[serde(rename = "sourceVersion")]
+        pub source_version: String,
+        pub _links: BuildLinks,
     }
 
     #[derive(serde::Deserialize)]
-    pub struct FullBuild {
-        pub jobs: Vec<Job>,
+    pub struct BuildLinks {
+        pub timeline: Link,
     }
 
     #[derive(serde::Deserialize)]
-    pub struct Job {
-        pub id: u64,
-        pub number: String,
+    pub struct Link {
+        pub href: String,
     }
 
     #[derive(serde::Deserialize)]
-    pub struct Commit {
-        pub id: u64,
-        pub sha: String,
-    }
-}
-
-#[allow(dead_code)]
-mod appveyor {
-    #[derive(serde::Deserialize)]
-    pub struct Builds {
-        pub builds: Vec<Build>,
+    pub struct Timeline {
+        pub records: Vec<TimelineRecord>,
     }
 
     #[derive(serde::Deserialize)]
-    pub struct Build {
-        #[serde(rename = "buildId")]
-        pub id: u64,
-        #[serde(rename = "buildNumber")]
-        pub build_number: u64,
-        pub version: String,
-        #[serde(rename = "commitId")]
-        pub commit_id: String,
-    }
-
-    #[derive(serde::Deserialize)]
-    pub struct GetFullBuild {
-        pub build: FullBuild,
-    }
-
-    #[derive(serde::Deserialize)]
-    pub struct FullBuild {
-        pub jobs: Vec<Job>,
-    }
-
-    #[derive(serde::Deserialize)]
-    pub struct Job {
-        #[serde(rename = "jobId")]
+    pub struct TimelineRecord {
         pub id: String,
+        pub r#type: String,
+        pub log: Option<TimelineLog>,
+    }
+
+    #[derive(serde::Deserialize)]
+    pub struct TimelineLog {
+        pub url: String,
     }
 }
