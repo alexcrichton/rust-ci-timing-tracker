@@ -124,9 +124,10 @@ impl Context {
             let line = line.trim();
             if let Some(rest) = find_get_after(line, "[RUSTC-TIMING] ") {
                 let mut iter = rest.rsplitn(2, ' ');
-                let time = iter.next().unwrap().parse::<f64>().unwrap();
-                let name = iter.next().unwrap();
-                *parts.entry(name.to_string()).or_insert(0.0) += time;
+                if let Ok(time) = iter.next().unwrap().parse::<f64>() {
+                    let name = iter.next().unwrap();
+                    *parts.entry(name.to_string()).or_insert(0.0) += time;
+                }
             }
 
             if let Some(rest) = find_get_after(line, "[TIMING] ") {
