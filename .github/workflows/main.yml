@@ -1,0 +1,51 @@
+name: CI
+on:
+  push:
+    branches:
+      - master
+  schedule:
+    # Once a day at 8am run the build
+    - cron:  '0 8 * * *'
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    - name: Install Rust
+      run: rustup update stable && rustup default stable
+    - run: |
+        set -e
+        pip install setuptools
+        pip install --user awscli
+        echo "##[add-path]$HOME/.local/bin"
+      name: Install awscli
+    - run: git clone https://github.com/rust-lang/rust --depth 200
+    - run: mkdir cache
+
+    - name: Collect data
+      run: cargo run --bin publish-data-to-s3 ./rust ./cache
+      env:
+        S3_BUCKET: rust-ci-timing-tracker
+        RUST_LOG: publish=debug
+
+    - name: Upload data to s3
+      run: aws s3 cp --recursive ./cache s3://rust-ci-timing-tracker/
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+    - name: Build gh-pages
+      run: cargo run --bin build-site ./rust ./cache ./html
+      env:
+        S3_BUCKET: rust-ci-timing-tracker
+        RUST_LOG: build=debug
+
+    - name: Publish documentation
+      run: |
+        cd html
+        git init
+        git add .
+        git -c user.name='ci' -c user.email='ci' commit -m init
+        git push -f -q https://git:${{ secrets.github_token }}@github.com/${{ github.repository }} HEAD:gh-pages
