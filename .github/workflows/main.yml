@@ -48,4 +48,4 @@ jobs:
         git init
         git add .
         git -c user.name='ci' -c user.email='ci' commit -m init
-        git push -f https://git:${{ secrets.github_token }}@github.com/${{ github.repository }} HEAD:gh-pages
+        git push -f https://git:${{ secrets.GITHUB_PAGES_TOKEn }}@github.com/${{ github.repository }} HEAD:gh-pages
