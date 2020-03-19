@@ -1,0 +1,27 @@
+td {
+  border: 1px solid black;
+  padding: 2px;
+  text-align: right;
+}
+
+table tr:first-child {
+  font-weight: bold;
+  font-size: 25px;
+}
+
+table tr:first-child td {
+  text-align: center;
+}
+
+tr:first-child .load {
+  vertical-align: top;
+}
+
+.faster {
+  color: green;
+}
+
+.slower {
+  color: red;
+}
+

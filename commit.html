@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta content="text/html;charset=utf-8" http-equiv="Content-Type"/>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css" integrity="sha384-HSMxcRTRxnN+Bdg0JdbxYKrThecOKuH5zCYotlSAcp1+c8xmyTe9GYg1l9a69psu" crossorigin="anonymous">
+    <link rel="stylesheet" href="commit.css">
+  </head>
+  <body>
+    <div class='container'>
+      <h1 id='banner'>CI Timing</h1>
+
+      <div id='controls' style='display:none'>
+        <a href='index.html'>Back to Main Chart</a>
+        ·
+        <input type='text' id='load-commit'></input>
+        <a id='load-commit-link' href='#'>Load Commit</a>
+        ·
+        <input type='checkbox' id='relative'>
+        Relative to first
+      </div>
+      <div id='charts'>
+        <div id='loading'>
+          Loading data...
+        </div>
+      </div>
+    </div>
+    <script src="commit.js"></script>
+  </body>
+</html>
+
+
